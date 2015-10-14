@@ -155,7 +155,11 @@ func (this *SkipList) put(key []byte, value interface{}, action func(oldValue in
 					}
 
 					if onlyIfAbsent || n.casValue(v, unsafe.Pointer(&newValue)) {
-						return *((*interface{})(v))
+						if v == nil {
+							return nil
+						} else {
+							return *((*interface{})(v))
+						}
 					} else {
 						break
 					}
@@ -206,7 +210,11 @@ func (this *SkipList) get(key []byte) interface{} {
 			return nil
 		}
 
-		return *((*interface{})(n.Value))
+		if n.Value == nil {
+			return nil
+		} else {
+			return *((*interface{})(n.Value))
+		}
 	}
 }
 
@@ -281,7 +289,11 @@ func (this *SkipList) remove(key []byte, value interface{}) interface{} {
 				atomic.AddInt32(&(this.Size), -1)
 			}
 
-			return *((*interface{})(v))
+			if v == nil {
+				return nil
+			} else {
+				return *((*interface{})(v))
+			}
 		}
 	}
 }
