@@ -69,7 +69,7 @@ func (this *SkipList) findPredecessor(key []byte) *Node {
 	}
 }
 
-func (this *SkipList) Put(key []byte, value interface{}) (interface{}, error) {
+func (this *SkipList) Put(key []byte, value interface{}) (*interface{}, error) {
 	if key == nil {
 		return nil, ErrNilKey
 	}
@@ -81,7 +81,7 @@ func (this *SkipList) Put(key []byte, value interface{}) (interface{}, error) {
 	return this.put(key, value, nil, false), nil
 }
 
-func (this *SkipList) PutOnlyIfAbsent(key []byte, value interface{}) (interface{}, error) {
+func (this *SkipList) PutOnlyIfAbsent(key []byte, value interface{}) (*interface{}, error) {
 	if key == nil {
 		return nil, ErrNilKey
 	}
@@ -93,7 +93,7 @@ func (this *SkipList) PutOnlyIfAbsent(key []byte, value interface{}) (interface{
 	return this.put(key, value, nil, true), nil
 }
 
-func (this *SkipList) Update(key []byte, action func(oldValue interface{}) interface{}) (interface{}, error) {
+func (this *SkipList) Update(key []byte, action func(oldValue interface{}) interface{}) (*interface{}, error) {
 	if key == nil {
 		return nil, ErrNilKey
 	}
@@ -105,7 +105,7 @@ func (this *SkipList) Update(key []byte, action func(oldValue interface{}) inter
 	return this.put(key, nil, action, false), nil
 }
 
-func (this *SkipList) UpdateOnlyIfAbsent(key []byte, action func(oldValue interface{}) interface{}) (interface{}, error) {
+func (this *SkipList) UpdateOnlyIfAbsent(key []byte, action func(oldValue interface{}) interface{}) (*interface{}, error) {
 	if key == nil {
 		return nil, ErrNilKey
 	}
@@ -117,7 +117,7 @@ func (this *SkipList) UpdateOnlyIfAbsent(key []byte, action func(oldValue interf
 	return this.put(key, nil, action, true), nil
 }
 
-func (this *SkipList) put(key []byte, value interface{}, action func(oldValue interface{}) interface{}, onlyIfAbsent bool) interface{} {
+func (this *SkipList) put(key []byte, value interface{}, action func(oldValue interface{}) interface{}, onlyIfAbsent bool) *interface{} {
 	for {
 		var b = this.findPredecessor(key)
 		var n = (*Node)(b.Next)
@@ -158,7 +158,7 @@ func (this *SkipList) put(key []byte, value interface{}, action func(oldValue in
 						if v == nil {
 							return nil
 						} else {
-							return *((*interface{})(v))
+							return (*interface{})(v)
 						}
 					} else {
 						break
@@ -191,7 +191,7 @@ func (this *SkipList) put(key []byte, value interface{}, action func(oldValue in
 	}
 }
 
-func (this *SkipList) Get(key []byte) (interface{}, error) {
+func (this *SkipList) Get(key []byte) (*interface{}, error) {
 	if key == nil {
 		return nil, ErrNilKey
 	}
@@ -203,22 +203,18 @@ func (this *SkipList) ContainsKey(key []byte) bool {
 	return this.get(key) != nil
 }
 
-func (this *SkipList) get(key []byte) interface{} {
+func (this *SkipList) get(key []byte) *interface{} {
 	for {
 		var n = this.findNode(key)
 		if n == nil {
 			return nil
 		}
 
-		if n.Value == nil {
-			return nil
-		} else {
-			return *((*interface{})(n.Value))
-		}
+		return (*interface{})(n.Value)
 	}
 }
 
-func (this *SkipList) Remove(key []byte) (interface{}, bool, error) {
+func (this *SkipList) Remove(key []byte) (*interface{}, bool, error) {
 	if key == nil {
 		return nil, false, ErrNilKey
 	}
@@ -234,7 +230,7 @@ func (this *SkipList) CompareAndRemove(key []byte, value interface{}) (bool, err
 	return this.remove(key, value) != nil, nil
 }
 
-func (this *SkipList) remove(key []byte, value interface{}) interface{} {
+func (this *SkipList) remove(key []byte, value interface{}) *interface{} {
 	for {
 		var b = this.findPredecessor(key)
 		var n = (*Node)(b.Next)
@@ -289,11 +285,7 @@ func (this *SkipList) remove(key []byte, value interface{}) interface{} {
 				atomic.AddInt32(&(this.Size), -1)
 			}
 
-			if v == nil {
-				return nil
-			} else {
-				return *((*interface{})(v))
-			}
+			return (*interface{})(v)
 		}
 	}
 }
