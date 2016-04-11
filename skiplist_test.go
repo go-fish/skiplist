@@ -1,163 +1,202 @@
 package skiplist
 
 import (
-	"bytes"
-	"math/rand"
 	"testing"
-
-	"github.com/smartystreets/goconvey/convey"
+	"unsafe"
 )
 
-func TestNil(t *testing.T) {
-	convey.Convey("Nil Can Not Be Key Or Value/Action", t, func() {
-		skiplist := NewSkipList()
-		_, err := skiplist.Put(nil, 111)
-		convey.So(err, convey.ShouldNotBeNil)
+var sl = NewSkiplist(32)
 
-		var nilKey []byte = nil
-		_, err = skiplist.Put(nilKey, 111)
-		convey.So(err, convey.ShouldNotBeNil)
+func TestPut(t *testing.T) {
+	key := []byte("test")
+	value := 111
+	old, err := sl.Put(key, unsafe.Pointer(&value))
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
+	}
 
-		_, err = skiplist.Put([]byte{'1'}, nil)
-		convey.So(err, convey.ShouldNotBeNil)
+	if old != nil {
+		t.Fatalf("wanted nil, get %v\n", old)
+	}
 
-		_, err = skiplist.Get(nil)
-		convey.So(err, convey.ShouldNotBeNil)
+	val, err := sl.Get(key)
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
+	}
 
-		_, err = skiplist.Get(nilKey)
-		convey.So(err, convey.ShouldNotBeNil)
-
-		_, _, err = skiplist.Remove(nil)
-		convey.So(err, convey.ShouldNotBeNil)
-
-		_, _, err = skiplist.Remove(nilKey)
-		convey.So(err, convey.ShouldNotBeNil)
-	})
+	if val != unsafe.Pointer(&value) {
+		t.Fatalf("wanted %v, get %v\n", value, val)
+	}
 }
 
-func TestSkipList(t *testing.T) {
-	var key []byte = []byte{'t', 'e', 's', 't'}
-	var value interface{} = 111
-
-	skiplist := NewSkipList()
-
-	//test put
-	previou, err := skiplist.Put(key, value)
-	if previou != nil || err != nil {
-		t.Errorf("Put %v, %v , return %v, %v, want nil, nil", key, value, previou, err)
+func TestPutOnlyIfAbsent(t *testing.T) {
+	key := []byte("test")
+	value := 222
+	old, err := sl.PutOnlyIfAbsent(key, unsafe.Pointer(&value))
+	if err != ErrKeyExists {
+		t.Fatalf("wanted %v, get %v\n", ErrKeyExists, err)
 	}
 
-	//test get key
-	res, err := skiplist.Get(key)
-	if res != value || err != nil {
-		t.Errorf("Get %v , return %v, %v, want %v, nil", key, res, err, value)
+	if old != nil {
+		t.Fatalf("wanted nil, get %d\n", *(*int)(old))
 	}
 
-	//test put same key
-	v := rand.Float64()
-	previou, err = skiplist.Put(key, v)
-	if previou != value || err != nil {
-		t.Errorf("Put %v, %v second time, return %v, %v, want %v, nil", key, v, previou, err, value)
+	key = []byte("test1")
+	old, err = sl.PutOnlyIfAbsent(key, unsafe.Pointer(&value))
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
 	}
 
-	//test get key
-	res, err = skiplist.Get(key)
-	if res.(float64) != v || err != nil {
-		t.Errorf("Get %v , return %v, %v, want %v, nil", key, res.(float64), err, v)
+	if old != nil {
+		t.Fatalf("wanted nil, get %v\n", old)
 	}
 
-	//test put only if absent, only if key is not exists, put the value to skiplist
-	previou, err = skiplist.PutOnlyIfAbsent(key, value)
-	if previou.(float64) != v || err != nil {
-		t.Errorf("Put %v, %v, return %v, %v, want %v, nil", key, value, previou, err, v)
+	val, err := sl.Get(key)
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
 	}
 
-	//test get key
-	res, err = skiplist.Get(key)
-	if res.(float64) != v || err != nil {
-		t.Errorf("Get %v , return %v, %v, want %v, nil", key, res.(float64), err, v)
+	if val != unsafe.Pointer(&value) {
+		t.Fatalf("wanted %v, get %v\n", value, val)
+	}
+}
+
+func TestRemove(t *testing.T) {
+	key := []byte("test")
+	old, err := sl.Remove(key)
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
 	}
 
-	var secondKey []byte = []byte{'t', 'e'}
-	previou, err = skiplist.PutOnlyIfAbsent(secondKey, value)
-	if previou != nil || err != nil {
-		t.Errorf("Put %v, %v , return %v, %v, want nil, nil", secondKey, value, previou, err)
+	if *(*int)(old) != 111 {
+		t.Fatalf("wanted 111, get %d\n", *(*int)(old))
 	}
 
-	//test get key
-	res, err = skiplist.Get(secondKey)
-	if res != value || err != nil {
-		t.Errorf("Get %v , return %v, %v, want %v, nil", secondKey, res, err, value)
+	val, err := sl.Get(key)
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
 	}
 
-	//test remove key only if value of secondKey == v
-	ok, err := skiplist.CompareAndRemove(secondKey, v)
-	if ok != false || err != nil {
-		t.Errorf("Remove %v, %v , return %v, %v, want false, nil", secondKey, v, ok, err)
+	if val != nil {
+		t.Fatalf("wanted nil, get %v\n", val)
 	}
 
-	//test get key
-	res, err = skiplist.Get(secondKey)
-	if res != value || err != nil {
-		t.Errorf("Get %v , return %v, %v, want %v, nil", secondKey, res, err, value)
+	ok, err := sl.Contains(key)
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
 	}
 
-	//test remove key
-	previou, ok, err = skiplist.Remove(secondKey)
-	if previou != value || ok != true || err != nil {
-		t.Errorf("Remove %v , return %v, %v, %v, want %v, true, nil", key, previou, ok, err, value)
+	if ok {
+		t.Fatalf("wanted false, get %v\n", ok)
 	}
 
-	//test get key
-	res, err = skiplist.Get(secondKey)
-	if res != nil || err != nil {
-		t.Errorf("Get %v , return %v, %v, want nil, nil", secondKey, res, err)
+	val, _ = sl.Get([]byte("test1"))
+
+	old, err = sl.CompareAndRemove([]byte("test1"), val)
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
 	}
 
-	//test update key
-	previou, err = skiplist.Update(key, func(oldValue interface{}) interface{} {
-		return float64(2) * oldValue.(float64)
-	})
-	if previou != v || err != nil {
-		t.Errorf("Update %v , return %v, %v, want %v, nil", key, previou, err, v)
+	if *(*int)(old) != 222 {
+		t.Fatalf("wanted 222, get %d\n", *(*int)(old))
 	}
 
-	//test get key
-	res, err = skiplist.Get(key)
-	if res != float64(2)*v || err != nil {
-		t.Errorf("Get %v , return %v, %v, want %v, nil", key, res, err, float64(2)*v)
+	ok, err = sl.Contains([]byte("test1"))
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
 	}
 
-	var key1 = []byte{'t', 'e', 's', 't', '1', '1', '1'}
-	skiplist.Put(key1, 111)
-	skiplist.Put([]byte{'t', 'e', 's', 't', '1', '1', '2'}, 112)
-	skiplist.Put([]byte{'t', 'e', 's', 't', '1', '1', '3'}, 113)
+	if ok {
+		t.Fatalf("wanted false, get %v\n", ok)
+	}
+}
 
-	//test size
-	if skiplist.Size != 4 {
-		t.Errorf("Fail To Get Size Info, return %d, want 4", skiplist.Size)
+func TestUpdate(t *testing.T) {
+	key := []byte("test")
+	action := func(oldValue unsafe.Pointer) unsafe.Pointer {
+		old := *(*int)(oldValue)
+		old++
+
+		return unsafe.Pointer(&old)
 	}
 
-	//test iterator
-	submap, _ := NewSubMap(skiplist, nil, nil, false)
-
-	iterator := CreateIteratorFromSubMap(submap)
-
-	if iterator.HasNext() != true {
-		t.Errorf("Fail To Get Next Info, return false, want true")
+	old, err := sl.Update(key, action)
+	if err != ErrNilValue {
+		t.Fatalf("wanted %v, get %v", ErrNilValue, err)
 	}
 
-	k, val, err := iterator.NextNode()
-	if bytes.Compare(k, key) != 0 || val != float64(2)*v || err != nil {
-		t.Errorf("Get Next Node, return %v, %v, %v, want %v, %v, nil", k, val, err, key, float64(2)*v)
+	if old != nil {
+		t.Fatalf("wanted nil, get %v", old)
 	}
 
-	if iterator.HasNext() != true {
-		t.Errorf("Fail To Get Next Info, return false, want true")
+	key = []byte("test1")
+	value := 222
+	old, err = sl.PutOnlyIfAbsent(key, unsafe.Pointer(&value))
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
 	}
-	//
-	//	k, val, err = iterator.NextNode()
-	//	if bytes.Compare(k, []byte{'t', 'e', 's', 't', '1', '1', '1'}) != 0 || val != 111 || err != nil {
-	//		t.Errorf("Get Next Node, return %v, %v, %v, want test111, 111, nil", k, val, err)
-	//	}
+
+	if old != nil {
+		t.Fatalf("wanted nil, get %d\n", *(*int)(old))
+	}
+
+	key = []byte("test1")
+	old, err = sl.Update(key, action)
+	if err != nil {
+		t.Fatalf("wanted nil, get %v", old)
+	}
+
+	if *(*int)(old) != 222 {
+		t.Fatalf("wanted 223, get %d", *(*int)(old))
+	}
+
+	val, err := sl.Get(key)
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
+	}
+
+	if *(*int)(val) != 223 {
+		t.Fatalf("wanted 223, get %d\n", *(*int)(val))
+	}
+}
+
+func TestIterator(t *testing.T) {
+	v1, err := sl.Get([]byte("test1"))
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
+	}
+
+	if *(*int)(v1) != 223 {
+		t.Fatalf("wanted 223, get %d\n", *(*int)(v1))
+	}
+
+	val := 123
+	sl.Put([]byte("test2"), unsafe.Pointer(&val))
+	sl.Put([]byte("test3"), unsafe.Pointer(&val))
+	sl.Put([]byte("test4"), unsafe.Pointer(&val))
+	sl.Put([]byte("test5"), unsafe.Pointer(&val))
+	sl.Put([]byte("test6"), unsafe.Pointer(&val))
+	sl.Put([]byte("test7"), unsafe.Pointer(&val))
+	sl.Put([]byte("test8"), unsafe.Pointer(&val))
+
+	i, _ := NewIterator(sl, nil, nil)
+
+	for i.Next() {
+		k, v := i.NextNode()
+
+		t.Log(k, v)
+
+		if string(k) == "test5" {
+			i.Remove()
+		}
+	}
+
+	v, err := sl.Get([]byte("test5"))
+	if err != nil {
+		t.Fatalf("wanted nil, get %v\n", err)
+	}
+
+	if v != nil {
+		t.Fatalf("wanted nil, get %v\n", v)
+	}
 }

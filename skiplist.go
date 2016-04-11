@@ -2,591 +2,405 @@ package skiplist
 
 import (
 	"bytes"
-	"errors"
-	"math"
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
 )
 
-var (
-	ErrNilKey   = errors.New("Unsupport Nil Key")
-	ErrNilValue = errors.New("Unsupport Nil Value")
-)
-
-type SkipList struct {
-	Head unsafe.Pointer
-
+type Skiplist struct {
 	MaxLevel int
-
-	Ip int
-
-	Size int32
+	header   *index
+	count    int64
 }
 
-func NewSkipList() *SkipList {
-	return &SkipList{
-		Head:     unsafe.Pointer(createHeadIndex(createNode(nil, unsafe.Pointer(&BaseHeader), nil), nil, nil, 1)),
-		MaxLevel: 32,
-		Ip:       int(math.Ceil(1 / DefaultProbability)),
-	}
-}
-
-func (this *SkipList) findPredecessor(key []byte) *Node {
-	for {
-		var q = (*Index)(this.Head)
-		var r = (*Index)(q.Right)
-
-		for {
-			if r != nil {
-				var n = r.Node
-				var k = n.Key
-
-				if n.Value == nil {
-					if !q.unlink(r) {
-						break
-					}
-
-					r = (*Index)(q.Right)
-					continue
-				}
-
-				if bytes.Compare(key, k) > 0 {
-					q = r
-					r = (*Index)(r.Right)
-					continue
-				}
-			}
-
-			var d = (*Index)(q.Down)
-			if d != nil {
-				q = d
-				r = (*Index)(d.Right)
-			} else {
-				return q.Node
-			}
-		}
+//create new skiplist
+func NewSkiplist(maxLevel int) *Skiplist {
+	return &Skiplist{
+		MaxLevel: maxLevel,
+		header:   newHeader(nil, nil, nil, nil, nil, 1),
 	}
 }
 
-func (this *SkipList) Put(key []byte, value interface{}) (*interface{}, error) {
-	if key == nil {
-		return nil, ErrNilKey
-	}
+//random level
+func (sl *Skiplist) randomLevel() int {
+	level := 1
 
-	if value == nil {
-		return nil, ErrNilValue
-	}
-
-	return this.put(key, value, nil, false), nil
-}
-
-func (this *SkipList) PutOnlyIfAbsent(key []byte, value interface{}) (*interface{}, error) {
-	if key == nil {
-		return nil, ErrNilKey
-	}
-
-	if value == nil {
-		return nil, ErrNilValue
-	}
-
-	return this.put(key, value, nil, true), nil
-}
-
-func (this *SkipList) Update(key []byte, action func(oldValue interface{}) interface{}) (*interface{}, error) {
-	if key == nil {
-		return nil, ErrNilKey
-	}
-
-	if action == nil {
-		return nil, errors.New("Unsupport Nil Action In Func Update")
-	}
-
-	return this.put(key, nil, action, false), nil
-}
-
-func (this *SkipList) UpdateOnlyIfAbsent(key []byte, action func(oldValue interface{}) interface{}) (*interface{}, error) {
-	if key == nil {
-		return nil, ErrNilKey
-	}
-
-	if action == nil {
-		return nil, errors.New("Unsupport Nil Action In Func Update")
-	}
-
-	return this.put(key, nil, action, true), nil
-}
-
-func (this *SkipList) put(key []byte, value interface{}, action func(oldValue interface{}) interface{}, onlyIfAbsent bool) *interface{} {
-	for {
-		var b = this.findPredecessor(key)
-		var n = (*Node)(b.Next)
-
-		for {
-			if n != nil {
-				var f = (*Node)(n.Next)
-				if n != (*Node)(b.Next) {
-					break
-				}
-
-				var v = n.Value
-				if v == nil {
-					n.helpDelete(b, f)
-					break
-				}
-
-				if v == unsafe.Pointer(n) || b.Value == nil {
-					break
-				}
-
-				var c = bytes.Compare(key, n.Key)
-				if c > 0 {
-					b = n
-					n = f
-					continue
-				}
-				if c == 0 {
-					//get new value
-					var newValue interface{}
-					if value != nil {
-						newValue = value
-					} else {
-						newValue = action(*((*interface{})(v)))
-					}
-
-					if onlyIfAbsent || n.casValue(v, unsafe.Pointer(&newValue)) {
-						if v == nil {
-							return nil
-						} else {
-							return (*interface{})(v)
-						}
-					} else {
-						break
-					}
-				}
-			}
-
-			//get new value
-			var newValue interface{}
-			if value != nil {
-				newValue = value
-			} else {
-				newValue = action(nil)
-			}
-
-			var z = createNode(key, unsafe.Pointer(&newValue), unsafe.Pointer(n))
-			if b.casNext(unsafe.Pointer(n), unsafe.Pointer(z)) {
-				atomic.AddInt32(&(this.Size), 1)
-			} else {
-				break
-			}
-
-			var level = this.randomLevel()
-			if level > 0 {
-				this.insertIndex(z, level)
-			}
-
-			return nil
-		}
-	}
-}
-
-func (this *SkipList) Get(key []byte) (*interface{}, error) {
-	if key == nil {
-		return nil, ErrNilKey
-	}
-
-	return this.get(key), nil
-}
-
-func (this *SkipList) ContainsKey(key []byte) bool {
-	return this.get(key) != nil
-}
-
-func (this *SkipList) get(key []byte) *interface{} {
-	for {
-		var n = this.findNode(key)
-		if n == nil {
-			return nil
-		}
-
-		return (*interface{})(n.Value)
-	}
-}
-
-func (this *SkipList) Remove(key []byte) (*interface{}, bool, error) {
-	if key == nil {
-		return nil, false, ErrNilKey
-	}
-
-	return this.remove(key, nil), true, nil
-}
-
-func (this *SkipList) CompareAndRemove(key []byte, value interface{}) (bool, error) {
-	if key == nil {
-		return false, ErrNilKey
-	}
-
-	return this.remove(key, value) != nil, nil
-}
-
-func (this *SkipList) remove(key []byte, value interface{}) *interface{} {
-	for {
-		var b = this.findPredecessor(key)
-		var n = (*Node)(b.Next)
-
-		for {
-			if n == nil {
-				return nil
-			}
-
-			var f = (*Node)(n.Next)
-			if n != (*Node)(b.Next) {
-				break
-			}
-
-			var v = n.Value
-			if v == nil {
-				n.helpDelete(b, f)
-				break
-			}
-
-			if v == unsafe.Pointer(n) || b.Value == nil {
-				break
-			}
-
-			var c = bytes.Compare(key, n.Key)
-			if c < 0 {
-				return nil
-			}
-			if c > 0 {
-				b = n
-				n = f
-				continue
-			}
-
-			if value != nil && value != *((*interface{})(v)) {
-				return nil
-			}
-
-			if !n.casValue(n.Value, nil) {
-				break
-			}
-
-			if !n.appendMarker(f) || !b.casNext(unsafe.Pointer(n), unsafe.Pointer(f)) {
-				this.findNode(key)
-			} else {
-				this.findPredecessor(key)
-				var head = (*Index)(this.Head)
-				if head.Right == nil {
-					this.tryReduceLevel()
-				}
-
-				atomic.AddInt32(&(this.Size), -1)
-			}
-
-			return (*interface{})(v)
-		}
-	}
-}
-
-func (this *SkipList) tryReduceLevel() {
-	var h = (*Index)(this.Head)
-	var d = (*Index)(h.Down)
-	var e *Index
-	if d != nil {
-		e = (*Index)(d.Down)
-	}
-
-	if h.Level > 3 && d != nil && e != nil && e.Right == nil && d.Right == nil && h.Right == nil && this.casHead(this.Head, h.Down) && h.Right != nil {
-		this.casHead(h.Down, d.Down)
-	}
-}
-
-const DefaultProbability float64 = 0.25
-
-func (this *SkipList) randomLevel() int {
-	var level = 1
-
-	for level < this.MaxLevel && rand.Intn(this.Ip) == 0 {
+	for level < sl.MaxLevel && rand.Intn(4) == 0 {
 		level++
 	}
 
 	return level
 }
 
-func (this *SkipList) insertIndex(z *Node, level int) {
-	var h = (*Index)(this.Head)
-	var max = h.Level
-
-	if level <= max {
-		var idx *Index
-		for i := 1; i <= level; i++ {
-			idx = createIndex(z, idx, nil)
-		}
-
-		this.addIndex(idx, h, level)
-	} else {
-		level = max + 1
-		var idxs = make([]*Index, level+1, level+1)
-		var idx *Index
-
-		for i := 1; i <= level; i++ {
-			idx = createIndex(z, idx, nil)
-			idxs[i] = idx
-		}
-
-		var oldh *Index
-		var k int
-		for {
-			oldh = (*Index)(this.Head)
-			var oldhLevel = oldh.Level
-			if level <= oldhLevel {
-				k = level
-				break
-			}
-
-			var newh = oldh
-			var oldNode = oldh.Node
-			for j := oldhLevel + 1; j <= level; j++ {
-				newh = createHeadIndex(oldNode, newh, idxs[j], j)
-			}
-
-			if this.casHead(unsafe.Pointer(oldh), unsafe.Pointer(newh)) {
-				k = oldhLevel
-				break
-			}
-		}
-
-		this.addIndex(idxs[k], oldh, k)
-	}
-}
-
-func (this *SkipList) casHead(cmp, val unsafe.Pointer) bool {
-	return atomic.CompareAndSwapPointer(&this.Head, cmp, val)
-}
-
-func (this *SkipList) addIndex(idx, h *Index, level int) {
-	var insertionLevel = level
-
+//find precursor
+func (sl *Skiplist) findPrecursorOrNode(key []byte) (*node, bool) {
 	for {
-		var j = h.Level
-		var q = h
-		var r = (*Index)(q.Right)
-		var t = idx
+		//from sl.level to level 1
+		q := sl.header
+		r := q.right
 
 		for {
 			if r != nil {
-				var n = r.Node
-				var c = bytes.Compare(idx.Node.Key, n.Key)
-				if n.Value == nil {
-					if !q.unlink(r) {
+				n := r.node
+
+				//delete marked node
+				if n.marked {
+					q.deleteMarkedNode(r)
+					break
+				}
+
+				//compare key
+				c := bytes.Compare(n.key, key)
+				if c == 0 {
+					return n, true
+				}
+
+				//n.key < key, go right
+				if c == -1 {
+					q = r
+					r = q.right
+					continue
+				}
+			}
+
+			//r is nil || n.key > key, to the next level
+			d := q.down
+
+			//q is level 0, return the node of q
+			if d == nil {
+				return q.node, bytes.Equal(q.node.key, key)
+			}
+
+			q = d
+			r = q.right
+		}
+	}
+}
+
+func (sl *Skiplist) Put(key []byte, value unsafe.Pointer) (unsafe.Pointer, error) {
+	if key == nil {
+		return nil, ErrNilKey
+	}
+
+	if value == nil {
+		return nil, ErrNilValue
+	}
+
+	return sl.put(key, value, nil, false)
+}
+
+func (sl *Skiplist) PutOnlyIfAbsent(key []byte, value unsafe.Pointer) (unsafe.Pointer, error) {
+	if key == nil {
+		return nil, ErrNilKey
+	}
+
+	if value == nil {
+		return nil, ErrNilValue
+	}
+
+	return sl.put(key, value, nil, true)
+}
+
+func (sl *Skiplist) Update(key []byte, action func(unsafe.Pointer) unsafe.Pointer) (unsafe.Pointer, error) {
+	if key == nil {
+		return nil, ErrNilKey
+	}
+
+	if action == nil {
+		return nil, ErrNilAction
+	}
+
+	return sl.put(key, nil, action, false)
+}
+
+//put action
+func (sl *Skiplist) put(key []byte, value unsafe.Pointer, action func(unsafe.Pointer) unsafe.Pointer, onlyIfAbsent bool) (unsafe.Pointer, error) {
+	for {
+		prev, exactMatch := sl.findPrecursorOrNode(key)
+		//key exists
+		if exactMatch {
+			oldValue := prev.value
+
+			if !onlyIfAbsent {
+				//value is not nil
+				if value != nil {
+					if atomic.CompareAndSwapPointer(&(prev.value), oldValue, value) {
+						return oldValue, nil
+					}
+
+					continue
+				}
+
+				//action is not nil
+				if action != nil {
+					newValue := action(oldValue)
+					if atomic.CompareAndSwapPointer(&(prev.value), oldValue, newValue) {
+						return oldValue, nil
+					}
+
+					continue
+				}
+			}
+
+			return nil, ErrKeyExists
+		}
+
+		//key not exists
+		if value == nil {
+			return nil, ErrNilValue
+		}
+
+		n := prev.next
+		for {
+			if n != nil {
+				succ := n.next
+
+				//check node whether changed
+				if n != prev.next {
+					break
+				}
+
+				//delete marked node
+				if n.marked {
+					n.deleteMarkedNode(prev, succ)
+					break
+				}
+
+				//compare key
+				c := bytes.Compare(n.key, key)
+
+				//if n.key < key, go next
+				if c == -1 {
+					prev = n
+					n = succ
+					continue
+				}
+			}
+
+			//create new node
+			nn := newNode(key, value, n, prev)
+			if prev.casNext(n, nn) {
+				atomic.AddInt64(&sl.count, 1)
+			} else {
+				break
+			}
+
+			//get level
+			level := sl.randomLevel()
+
+			//insert index to each level
+			sl.insertIndex(nn, level)
+
+			return nil, nil
+		}
+	}
+}
+
+//Get
+func (sl *Skiplist) Get(key []byte) (unsafe.Pointer, error) {
+	if key == nil {
+		return nil, ErrNilKey
+	}
+
+	return sl.get(key), nil
+}
+
+//Contains
+func (sl *Skiplist) Contains(key []byte) (bool, error) {
+	if key == nil {
+		return false, ErrNilKey
+	}
+
+	return sl.get(key) != nil, nil
+}
+
+//get
+func (sl *Skiplist) get(key []byte) unsafe.Pointer {
+	if n, excatMatch := sl.findPrecursorOrNode(key); excatMatch {
+		return n.value
+	}
+
+	return nil
+}
+
+//reomve
+func (sl *Skiplist) Remove(key []byte) (unsafe.Pointer, error) {
+	if key == nil {
+		return nil, ErrNilKey
+	}
+
+	return sl.remove(key, nil), nil
+}
+
+//compareAndRemove
+func (sl *Skiplist) CompareAndRemove(key []byte, value unsafe.Pointer) (unsafe.Pointer, error) {
+	if key == nil {
+		return nil, ErrNilKey
+	}
+
+	if value == nil {
+		return nil, ErrNilValue
+	}
+
+	return sl.remove(key, value), nil
+}
+
+func (sl *Skiplist) remove(key []byte, value unsafe.Pointer) unsafe.Pointer {
+	for {
+		n, exactMatch := sl.findPrecursorOrNode(key)
+
+		//key exists
+		if exactMatch {
+			if (value != nil && value == n.value) || value == nil {
+				for !n.marked {
+					n.marked = true
+				}
+
+				atomic.AddInt64(&sl.count, -1)
+				return n.value
+			}
+		}
+
+		return nil
+	}
+}
+
+//insert index
+func (sl *Skiplist) insertIndex(n *node, level int) {
+	h := sl.header
+	max := h.level
+
+	var idx *index
+	if level <= max {
+		for i := 1; i <= level; i++ {
+			idx = newIndex(n, idx, nil)
+		}
+
+		//add index to skiplist
+		sl.addIndex(idx, h, level, max, 1)
+		return
+	}
+
+	level = max + 1
+	idxs := make([]*index, level+1)
+
+	for i := 1; i <= level; i++ {
+		idx = newIndex(n, idx, nil)
+		idxs[i] = idx
+	}
+
+	var k int
+	var oldHeader *index
+	for {
+		oldHeader = sl.header
+		oldLevel := oldHeader.level
+		if level <= oldLevel {
+			k = level
+			break
+		}
+
+		nh := oldHeader
+		oldNode := oldHeader.node
+		for j := oldLevel + 1; j <= level; j++ {
+			nh = newHeader(oldNode.key, oldNode.value, oldNode.next, nh, idxs[j], j)
+		}
+
+		if atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&sl.header)), unsafe.Pointer(oldHeader), unsafe.Pointer(nh)) {
+			k = oldLevel
+			break
+		}
+	}
+
+	sl.addIndex(idxs[k], oldHeader, k, max, 2)
+}
+
+//add index
+func (sl *Skiplist) addIndex(idx, h *index, level, max, pos int) {
+	l1 := level
+
+	for {
+		l := h.level
+		q := h
+		r := q.right
+		t := idx
+
+		for {
+			if r != nil {
+				n := r.node
+				c := bytes.Compare(idx.node.key, n.key)
+
+				//delete marked node
+				if n.marked {
+					if !q.deleteMarkedNode(r) {
 						break
 					}
-
-					r = (*Index)(q.Right)
-					continue
 				}
 
-				if c > 0 {
+				//find prev
+				if c == 1 {
 					q = r
-					r = (*Index)(r.Right)
+					r = r.right
 					continue
 				}
 			}
 
-			if j == insertionLevel {
-				if t.indexesDeletedNode() {
-					this.findNode(idx.Node.Key)
+			if l == l1 {
+				//idx is removed
+				if idx.node.marked {
+					//delete marked idx node
+					sl.findPrecursorOrNode(idx.node.key)
 					return
 				}
 
-				if !q.link(r, t) {
+				if !q.addIndex(r, t) {
 					break
 				}
 
-				insertionLevel--
-				if insertionLevel == 0 {
-					if t.indexesDeletedNode() {
-						this.findNode(idx.Node.Key)
+				l1--
+				if l1 == 0 {
+					if idx.node.marked {
+						sl.findPrecursorOrNode(idx.node.key)
 					}
+
 					return
 				}
 			}
 
-			j--
-			if j >= insertionLevel && j < level {
-				t = (*Index)(t.Down)
+			l--
+			if l >= l1 && l < level {
+				t = t.down
 			}
 
-			q = (*Index)(q.Down)
-			r = (*Index)(q.Right)
+			q = q.down
+			r = q.right
 		}
 	}
 }
 
-func (this *SkipList) findNode(key []byte) *Node {
+//find last level header
+func (sl *Skiplist) findBottomHeader() *index {
+	h := sl.header
+	d := h.down
+
 	for {
-		var b = this.findPredecessor(key)
-		var n = (*Node)(b.Next)
-
-		for {
-			if n == nil {
-				return nil
-			}
-
-			var f = (*Node)(n.Next)
-			if n != (*Node)(b.Next) {
-				break
-			}
-
-			if n.Value == nil {
-				n.helpDelete(b, f)
-				break
-			}
-			if n.Value == unsafe.Pointer(n) || b.Value == nil {
-				break
-			}
-
-			var c = bytes.Compare(key, n.Key)
-			if c == 0 {
-				return n
-			}
-			if c < 0 {
-				return nil
-			}
-
-			b = n
-			n = f
+		if d == nil {
+			return h
 		}
+		if d.down == nil {
+			return d
+		}
+
+		d = d.down
 	}
 }
 
-func (this *SkipList) findFirst() *Node {
-	for {
-		var h = (*Index)(this.Head)
-		var b = h.Node
-		var n = (*Node)(b.Next)
-
-		if n == nil {
-			return nil
-		}
-
-		if n.Value != nil {
-			return n
-		}
-
-		n.helpDelete(b, (*Node)(n.Next))
+//find first node
+func (sl *Skiplist) findFirstNode() *node {
+	h := sl.findBottomHeader()
+	r := h.right
+	if r == nil {
+		return nil
 	}
-}
 
-func (this *SkipList) findLast() *Node {
-	var q = (*Index)(this.Head)
-	for {
-		var r = (*Index)(q.Right)
-		var d = (*Index)(q.Down)
-		if r != nil {
-			if r.indexesDeletedNode() {
-				q.unlink(r)
-				q = (*Index)(this.Head)
-			} else {
-				q = r
-			}
-		} else if d != nil {
-			q = d
-		} else {
-			var b = q.Node
-			var n = (*Node)(b.Next)
-
-			for {
-				if n == nil {
-					if b.isBaseHeader() {
-						return nil
-					} else {
-						return b
-					}
-				}
-
-				var f = (*Node)(n.Next)
-				if n != (*Node)(b.Next) {
-					break
-				}
-
-				var v = n.Value
-				if v == nil {
-					n.helpDelete(b, f)
-					break
-				}
-
-				if v == unsafe.Pointer(n) || b.Value == nil {
-					break
-				}
-
-				b = n
-				n = f
-			}
-
-			q = (*Index)(this.Head)
-		}
-	}
-}
-
-const (
-	GT = iota
-	EQ
-	LT
-)
-
-/**
- * Utility for ceiling, floor, lower, higher methods.
- * @param key the key
- * @param rel the relation -- OR'ed combination of EQ, LT, GT
- * @return nearest node fitting relation, or nil if no such
- */
-func (this *SkipList) findNear(key []byte, rel int) *Node {
-	for {
-		var b = this.findPredecessor(key)
-		var n = (*Node)(b.Next)
-
-		for {
-			if n == nil {
-				if (rel&LT) == 0 || b.isBaseHeader() {
-					return nil
-				} else {
-					return b
-				}
-			}
-
-			var f = (*Node)(n.Next)
-			if n != (*Node)(b.Next) {
-				break
-			}
-
-			var v = n.Value
-			if v == nil {
-				n.helpDelete(b, f)
-				break
-			}
-
-			if v == unsafe.Pointer(n) || b.Value == nil {
-				break
-			}
-
-			var c = bytes.Compare(key, n.Key)
-			if (c == 0 && (rel&EQ) != 0) || (c < 0 && (rel&LT == 0)) {
-				return n
-			}
-
-			if c <= 0 && (rel&LT) != 0 {
-				if b.isBaseHeader() {
-					return nil
-				} else {
-					return b
-				}
-			}
-
-			b = n
-			n = f
-		}
-	}
+	return r.node
 }

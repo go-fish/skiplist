@@ -5,61 +5,30 @@ import (
 	"unsafe"
 )
 
-type Node struct {
-	Key   []byte
-	Value unsafe.Pointer
-
-	Next unsafe.Pointer
+type node struct {
+	key    []byte
+	value  unsafe.Pointer
+	next   *node
+	marked bool
 }
 
-func createNode(key []byte, value unsafe.Pointer, next unsafe.Pointer) *Node {
-	return &Node{
-		Key:   key,
-		Value: value,
-		Next:  next,
+//create new node
+func newNode(key []byte, value unsafe.Pointer, next *node, prev *node) *node {
+	return &node{
+		key:   key,
+		value: value,
+		next:  next,
 	}
 }
 
-func createMarker(next unsafe.Pointer) *Node {
-	var node = &Node{}
-
-	node.Value = unsafe.Pointer(node)
-	node.Next = next
-
-	return node
-}
-
-func (this *Node) casValue(cmp, val unsafe.Pointer) bool {
-	return atomic.CompareAndSwapPointer(&this.Value, cmp, val)
-}
-
-func (this *Node) casNext(cmp, val unsafe.Pointer) bool {
-	return atomic.CompareAndSwapPointer(&this.Next, cmp, val)
-}
-
-func (this *Node) isMarker() bool {
-	return this.Value == unsafe.Pointer(this)
-}
-
-var BaseHeader = 0
-
-func (this *Node) isBaseHeader() bool {
-	return this.Value == unsafe.Pointer(&BaseHeader)
-}
-
-func (this *Node) appendMarker(f *Node) bool {
-	return this.casNext(unsafe.Pointer(f), unsafe.Pointer(createMarker(unsafe.Pointer(f))))
-}
-
-func (this *Node) helpDelete(b, f *Node) {
-	var f1 = unsafe.Pointer(f)
-	var t = unsafe.Pointer(this)
-
-	if f1 == this.Next && t == b.Next {
-		if f == nil || f.Value != f1 {
-			this.casNext(f1, unsafe.Pointer(createMarker(f1)))
-		} else {
-			b.casNext(t, f.Next)
-		}
+//delete marked node
+func (n *node) deleteMarkedNode(prev, succ *node) {
+	if n == prev.next && succ == n.next {
+		prev.casNext(n, succ)
 	}
+}
+
+//cas next
+func (n *node) casNext(cmp, succ *node) bool {
+	return atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&n.next)), unsafe.Pointer(cmp), unsafe.Pointer(succ))
 }

@@ -5,45 +5,49 @@ import (
 	"unsafe"
 )
 
-type Index struct {
-	Node *Node
-
-	Down, Right unsafe.Pointer
-
-	Level int
+type index struct {
+	node  *node
+	right *index
+	down  *index
+	level int
 }
 
-func createIndex(node *Node, down, right *Index) *Index {
-	return &Index{
-		Node:  node,
-		Down:  unsafe.Pointer(down),
-		Right: unsafe.Pointer(right),
+//create header
+func newHeader(key []byte, value unsafe.Pointer, next *node, down, right *index, level int) *index {
+	return &index{
+		node: &node{
+			key:   key,
+			value: value,
+			next:  next,
+		},
+		down:  down,
+		right: right,
+		level: level,
 	}
 }
 
-func createHeadIndex(node *Node, down, right *Index, level int) *Index {
-	var index = createIndex(node, down, right)
-	index.Level = level
-
-	return index
+//create index
+func newIndex(n *node, down, right *index) *index {
+	return &index{
+		node:  n,
+		down:  down,
+		right: right,
+	}
 }
 
-func (this *Index) casRight(cmp, val unsafe.Pointer) bool {
-	return atomic.CompareAndSwapPointer(&this.Right, cmp, val)
+//delete marked node
+func (i *index) deleteMarkedNode(succ *index) bool {
+	return !i.node.marked && i.casRight(succ, succ.right)
 }
 
-//@return true if indexed node is known to be deleted
-func (this *Index) indexesDeletedNode() bool {
-	return this.Node.Value == nil
+//cas right index
+func (i *index) casRight(cmp, right *index) bool {
+	return atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&i.right)), unsafe.Pointer(cmp), unsafe.Pointer(right))
 }
 
-func (this *Index) link(succ, newSucc *Index) bool {
-	var n = this.Node
-	newSucc.Right = unsafe.Pointer(succ)
+//add index
+func (i *index) addIndex(succ, newSucc *index) bool {
+	newSucc.right = succ
 
-	return n.Value != nil && this.casRight(unsafe.Pointer(succ), unsafe.Pointer(newSucc))
-}
-
-func (this *Index) unlink(succ *Index) bool {
-	return !this.indexesDeletedNode() && this.casRight(unsafe.Pointer(succ), succ.Right)
+	return !i.node.marked && i.casRight(succ, newSucc)
 }

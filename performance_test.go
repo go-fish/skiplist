@@ -2,161 +2,130 @@ package skiplist
 
 import (
 	"fmt"
-	"runtime"
-	"strconv"
+	"math/rand"
 	"sync"
 	"testing"
+	"time"
+	"unsafe"
 )
 
-var (
-	listN    int
-	number   int
-	list     [][]byte
-	skipList *SkipList
-	readLM   *lockMap
-	readM    map[interface{}]interface{}
-)
+type List struct {
+	list map[string]bool
+	mx   *sync.RWMutex
+}
+
+var keys [][]byte
+var keysString []string
+var list *Skiplist
+var list1 map[string]bool
+var list2 *List
+
+const defaultKeys = 100000
 
 func init() {
-	MAXPROCS := runtime.NumCPU()
-	runtime.GOMAXPROCS(MAXPROCS)
-	listN = MAXPROCS * 10
-	number = 100000
-	fmt.Println("MAXPROCS is ", MAXPROCS, ", listN is", listN, ", n is ", number, "\n")
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	list = make([][]byte, listN, listN)
-	for i := 0; i < listN; i++ {
-		list1 := make([]byte, 0, number)
-		for j := 0; j < number; j++ {
-			list1 = append(list1, []byte(strconv.Itoa(j+(i)*number/10))...)
+	//初始化10000000个keys
+	keys = make([][]byte, 0, defaultKeys)
+	keysString = make([]string, 0, defaultKeys)
+
+	for i := 0; i < defaultKeys; i++ {
+
+		//随机生成key
+		var length = r.Intn(1000)
+		var buff []byte
+		for j := 0; j < length; j++ {
+			buff = make([]byte, 0, length)
+
+			buff = append(buff, byte(r.Uint32()))
 		}
-		list[i] = list1
+
+		keys = append(keys, buff)
+		keysString = append(keysString, string(buff))
 	}
 
-	skipList = NewSkipList()
-	readLM = newLockMap()
+	list = NewSkiplist(32)
+	list1 = make(map[string]bool)
+	list2 = &List{
+		list: make(map[string]bool),
+		mx:   &sync.RWMutex{},
+	}
+
+	fmt.Println("init success")
 }
 
-type lockMap struct {
-	m  map[interface{}]interface{}
-	rw *sync.RWMutex
-}
-
-func newLockMap() *lockMap {
-	return &lockMap{make(map[interface{}]interface{}), new(sync.RWMutex)}
-}
-
-func (t *lockMap) put(k interface{}, v interface{}) {
-	t.rw.Lock()
-	defer t.rw.Unlock()
-	t.m[k] = v
-}
-
-func (t *lockMap) get(k interface{}) (v interface{}, ok bool) {
-	t.rw.RLock()
-	defer t.rw.RUnlock()
-	v, ok = t.m[k]
-	return
-}
-
-func BenchmarkLockMapPut(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		wg := new(sync.WaitGroup)
-		wg.Add(listN)
-		for i := 0; i < listN; i++ {
-			k := i
-			go func() {
-				for _, j := range list[k] {
-					readLM.put(j, j)
-				}
-				wg.Done()
-			}()
-		}
-		wg.Wait()
+//单线程
+func BenchmarkSkiplistPut(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		var key = keys[i%defaultKeys]
+		var value = 111
+		list.Put(key, unsafe.Pointer(&value))
 	}
 }
 
 func BenchmarkMapPut(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		cm := make(map[interface{}]interface{})
+	for i := 0; i < b.N; i++ {
+		var key = keysString[i%defaultKeys]
+		list1[key] = true
+	}
+}
 
-		//wg := new(sync.WaitGroup)
-		//wg.Add(listN)
-		for i := 0; i < listN; i++ {
-			for _, j := range list[i] {
-				cm[j] = j
+func BenchmarkLockMapPut(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		var key = keysString[i%defaultKeys]
+		list2.mx.Lock()
+		list2.list[key] = true
+		list2.mx.Unlock()
+	}
+}
+
+var threads = 1000
+
+//多线程
+func TestSkiplistPut32(t *testing.T) {
+	var wg = &sync.WaitGroup{}
+	wg.Add(threads * 100000)
+
+	var start = time.Now()
+
+	for i := 0; i < threads; i++ {
+		go func() {
+
+			for j := 0; j < 100000; j++ {
+				var key = keys[j%defaultKeys]
+				var value = true
+				list.Put(key, unsafe.Pointer(&value))
+				wg.Done()
 			}
-			//wg.Done()
-		}
+
+		}()
 	}
+
+	wg.Wait()
+
+	t.Logf("time: %f", time.Since(start).Seconds())
 }
 
-func BenchmarkSkipListPut(b *testing.B) {
-	for n := 0; n < b.N; n++ {
+func TestLockMapPut32(t *testing.T) {
+	var wg = &sync.WaitGroup{}
+	wg.Add(threads * 100000)
 
-		wg := new(sync.WaitGroup)
-		wg.Add(listN)
-		for i := 0; i < listN; i++ {
-			k := i
-			go func() {
-				for _, j := range list[k] {
-					skipList.Put([]byte{j}, j)
-				}
+	var start = time.Now()
+
+	for i := 0; i < threads; i++ {
+		go func() {
+			for j := 0; j < 100000; j++ {
+				var key = keysString[j%defaultKeys]
+				list2.mx.Lock()
+				list2.list[key] = true
+				list2.mx.Unlock()
 				wg.Done()
-			}()
-		}
-		wg.Wait()
-	}
-}
-
-func BenchmarkLockMapGet(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		wg := new(sync.WaitGroup)
-		wg.Add(listN)
-		for i := 0; i < listN; i++ {
-			k := i
-			go func() {
-				//itr := NewMapIterator(cm)
-				//for itr.HasNext() {
-				//	entry := itr.NextEntry()
-				//	k := entry.key.(string)
-				//	v := entry.value.(int)
-				for _, j := range list[k] {
-					_, _ = readLM.get(j)
-				}
-				wg.Done()
-			}()
-		}
-		wg.Wait()
-	}
-}
-
-func BenchmarkMapGet(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		//wg := new(sync.WaitGroup)
-		//wg.Add(listN)
-		for i := 0; i < listN; i++ {
-			for k := range list[0] {
-				_, _ = readM[k]
 			}
-			//wg.Done()
-		}
-	}
-}
 
-func BenchmarkSkipListGet(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		wg := new(sync.WaitGroup)
-		wg.Add(listN)
-		for i := 0; i < listN; i++ {
-			k := i
-			go func() {
-				for _, j := range list[k] {
-					_, _ = skipList.Get([]byte{j})
-				}
-				wg.Done()
-			}()
-		}
-		wg.Wait()
+		}()
 	}
+
+	wg.Wait()
+
+	t.Logf("time: %f", time.Since(start).Seconds())
 }

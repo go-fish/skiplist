@@ -1,37 +1,52 @@
-# skiplist
-concurrent skiplist transplant from java
+## concurrent lock-free skiplist ##
 
-<h3>Current Version: 1.0 beta</h3>
-
-<h5>Put, Get, Remove, SubMap, Iterator</h5>
+### Current Version: 1.0beta
+##### Put, PutOnlyIfAbsent, Update, Get, Contains, Remove, Iterator #####
 
 ```Go
-var skipList = skiplist.NewSkipList()
 
-//put return the prev value and error
-previou, err := skiplist.Put([]byte("test"), 10) //return nil, nil
+//set max level
+sl := skiplist.NewSkiplist(32)
 
-//put only if the key does not exists
-previou, err = skiplist.PutOnlyIfAbsent([]byte("test"), 100) //return 10, nil
+key := []byte("test")
+val := 123
 
-//get
-res, err := skiplist.Get([]byte("test")) //return 10, nil
+//put
+previou, err := sl.Put(key, unsafe.Pointer(&val)) // return nil, nil
+
+//PutOnlyIfAbsent
+previou, err = sl.PutOnlyIfAbsent(key, unsafe.Pointer(&val)) // return nil, key already exists
 
 //update
-previou, err = skiplist.Update([]byte("test"), func(oldValue interface{}) interface{}{
-	return 2 * oldValue.(int)
-}) //return 10, nil
+previou, err = sl.Update(key, func(old unsafe.Pointer) unsafe.Pointer {
+	return *(*int)(old)++
+}) //return 123, nil
 
-//update only if the key does not exists
-previou, err = skiplist.UpdateOnlyIfAbsent([]byte("test"), func(oldValue interface{}) interface{}{
-	return 2 * oldValue.(int)
-}) //return 20, nil
+//Get
+previou, err = sl.Get(key) //return 124, nil
 
-//remove only if values eq
-var ok bool
-previou, ok, err = skiplist.CompareAndRemove([]byte("test"), 100) //return 20, false, nil
+//Contains
+ok, err := sl.Contains(key) //return true, nil
 
-//remove
-previou, ok, err = skiplist.Remove([]byte("test")) //return 20, true, nil
-```
+//Remove
+previou, err = sl.Remove(key) //return 124, nil
+
+//CompareAndRemove
+previou, err = sl.CompareAndRemove(key, value) //return nil, nil
+
+//Get
+previou, err = sl.Get(key) //return nil, nil
+
+//Contains
+ok, err := sl.Contains(key) //return false, nil
+
+//iterator
+it := skiplist.NewIterator(sl, nil, nil)
+
+//Next
+for it.Next() {
+	key, value := it.NextNode()
+}
+
+```Go
 
