@@ -44,14 +44,15 @@ func (sl *Skiplist) findPrecursorOrNode(key []byte) (*node, bool) {
 				n := r.node
 
 				//delete marked node
-				if n.marked {
-					q.deleteMarkedNode(r)
-					break
+				if atomic.LoadInt32(&n.marked) == 1 {
+					if !q.deleteMarkedNode(r) {
+						continue
+					}
 				}
 
 				//compare key
 				c := bytes.Compare(n.key, key)
-				if c == 0 {
+				if c == 0 && atomic.LoadInt32(&n.marked) == 0 {
 					return n, true
 				}
 
@@ -161,7 +162,7 @@ func (sl *Skiplist) put(key []byte, value unsafe.Pointer, action func(unsafe.Poi
 				}
 
 				//delete marked node
-				if n.marked {
+				if atomic.LoadInt32(&n.marked) == 1 {
 					n.deleteMarkedNode(prev, succ)
 					break
 				}
@@ -252,8 +253,8 @@ func (sl *Skiplist) remove(key []byte, value unsafe.Pointer) unsafe.Pointer {
 		//key exists
 		if exactMatch {
 			if (value != nil && value == n.value) || value == nil {
-				for !n.marked {
-					n.marked = true
+				for atomic.LoadInt32(&n.marked) == 0 {
+					atomic.StoreInt32(&n.marked, 1)
 				}
 
 				atomic.AddInt64(&sl.count, -1)
@@ -330,7 +331,7 @@ func (sl *Skiplist) addIndex(idx, h *index, level, max, pos int) {
 				c := bytes.Compare(idx.node.key, n.key)
 
 				//delete marked node
-				if n.marked {
+				if atomic.LoadInt32(&n.marked) == 1 {
 					if !q.deleteMarkedNode(r) {
 						break
 					}
@@ -346,7 +347,7 @@ func (sl *Skiplist) addIndex(idx, h *index, level, max, pos int) {
 
 			if l == l1 {
 				//idx is removed
-				if idx.node.marked {
+				if atomic.LoadInt32(&idx.node.marked) == 1 {
 					//delete marked idx node
 					sl.findPrecursorOrNode(idx.node.key)
 					return
@@ -358,7 +359,7 @@ func (sl *Skiplist) addIndex(idx, h *index, level, max, pos int) {
 
 				l1--
 				if l1 == 0 {
-					if idx.node.marked {
+					if atomic.LoadInt32(&idx.node.marked) == 1 {
 						sl.findPrecursorOrNode(idx.node.key)
 					}
 

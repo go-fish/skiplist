@@ -37,7 +37,7 @@ func newIndex(n *node, down, right *index) *index {
 
 //delete marked node
 func (i *index) deleteMarkedNode(succ *index) bool {
-	return !i.node.marked && i.casRight(succ, succ.right)
+	return atomic.LoadInt32(&i.node.marked) == 0 && i.casRight(succ, succ.right)
 }
 
 //cas right index
@@ -49,5 +49,5 @@ func (i *index) casRight(cmp, right *index) bool {
 func (i *index) addIndex(succ, newSucc *index) bool {
 	newSucc.right = succ
 
-	return !i.node.marked && i.casRight(succ, newSucc)
+	return atomic.LoadInt32(&i.node.marked) == 0 && i.casRight(succ, newSucc)
 }

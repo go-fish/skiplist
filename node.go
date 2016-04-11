@@ -9,7 +9,7 @@ type node struct {
 	key    []byte
 	value  unsafe.Pointer
 	next   *node
-	marked bool
+	marked int32
 }
 
 //create new node
