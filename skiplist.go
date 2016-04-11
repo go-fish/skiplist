@@ -266,6 +266,11 @@ func (sl *Skiplist) remove(key []byte, value unsafe.Pointer) unsafe.Pointer {
 	}
 }
 
+//Size
+func (sl *Skiplist) Count() int64 {
+	return atomic.LoadInt64(&sl.count)
+}
+
 //insert index
 func (sl *Skiplist) insertIndex(n *node, level int) {
 	h := sl.header
