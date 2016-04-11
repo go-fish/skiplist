@@ -47,6 +47,11 @@ it := skiplist.NewIterator(sl, nil, nil)
 for it.Next() {
 	key, value := it.NextNode()
 }
+```
 
-```Go
+##### performance #####
+tested 1000 grounite, each grounite put && get 100000 key-value pairs, result shows follow:
+![image](https://github.com/HearingFish/skiplist/performance.png)
+
+result shows that put is almost 70% faster than lock map and get is almost 10% faster than lock map
 

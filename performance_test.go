@@ -82,7 +82,7 @@ func BenchmarkLockMapPut(b *testing.B) {
 var threads = 1000
 
 //多线程
-func TestSkiplistPut32(t *testing.T) {
+func TestSkiplistPut(t *testing.T) {
 	var wg = &sync.WaitGroup{}
 	wg.Add(threads * 100000)
 
@@ -106,7 +106,7 @@ func TestSkiplistPut32(t *testing.T) {
 	t.Logf("time: %f", time.Since(start).Seconds())
 }
 
-func TestLockMapPut32(t *testing.T) {
+func TestLockMapPut(t *testing.T) {
 	var wg = &sync.WaitGroup{}
 	wg.Add(threads * 100000)
 
@@ -119,6 +119,53 @@ func TestLockMapPut32(t *testing.T) {
 				list2.mx.Lock()
 				list2.list[key] = true
 				list2.mx.Unlock()
+				wg.Done()
+			}
+
+		}()
+	}
+
+	wg.Wait()
+
+	t.Logf("time: %f", time.Since(start).Seconds())
+}
+
+func TestSkiplistGet(t *testing.T) {
+	var wg = &sync.WaitGroup{}
+	wg.Add(threads * 100000)
+
+	var start = time.Now()
+
+	for i := 0; i < threads; i++ {
+		go func() {
+
+			for j := 0; j < 100000; j++ {
+				var key = keys[j%defaultKeys]
+				list.Get(key)
+				wg.Done()
+			}
+
+		}()
+	}
+
+	wg.Wait()
+
+	t.Logf("time: %f", time.Since(start).Seconds())
+}
+
+func TestLockMapGet(t *testing.T) {
+	var wg = &sync.WaitGroup{}
+	wg.Add(threads * 100000)
+
+	var start = time.Now()
+
+	for i := 0; i < threads; i++ {
+		go func() {
+			for j := 0; j < 100000; j++ {
+				var key = keysString[j%defaultKeys]
+				list2.mx.RLock()
+				_ = list2.list[key]
+				list2.mx.RUnlock()
 				wg.Done()
 			}
 
