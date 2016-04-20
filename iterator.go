@@ -43,8 +43,15 @@ func (i *Iterator) Next() bool {
 //get next node
 func (i *Iterator) NextNode() ([]byte, unsafe.Pointer) {
 	i.lastNode = i.next
-	for i.next.next != nil && atomic.LoadInt32(&i.next.next.marked) == 0 {
-		i.next = i.next.next
+
+	p := i.next.next
+	for p != nil {
+		if atomic.LoadInt32(&p.marked) == 0 {
+			i.next = p
+			break
+		}
+
+		p = p.next
 	}
 
 	if i.next == i.lastNode || (i.hi != nil && bytes.Compare(i.next.key, i.hi) == 1) {
