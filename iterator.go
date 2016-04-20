@@ -1,6 +1,9 @@
 package skiplist
 
-import "unsafe"
+import (
+	"sync/atomic"
+	"unsafe"
+)
 
 type Iterator struct {
 	sl       *Skiplist
@@ -39,7 +42,13 @@ func (i *Iterator) Next() bool {
 //get next node
 func (i *Iterator) NextNode() ([]byte, unsafe.Pointer) {
 	i.lastNode = i.next
-	i.next = i.next.next
+	for i.next.next != nil && atomic.LoadInt32(&i.next.next.marked) == 0 {
+		i.next = i.next.next
+	}
+
+	if i.next == i.lastNode {
+		i.next = nil
+	}
 
 	return i.lastNode.key, i.lastNode.value
 }
