@@ -1,6 +1,7 @@
 package skiplist
 
 import (
+	"bytes"
 	"sync/atomic"
 	"unsafe"
 )
@@ -46,7 +47,7 @@ func (i *Iterator) NextNode() ([]byte, unsafe.Pointer) {
 		i.next = i.next.next
 	}
 
-	if i.next == i.lastNode {
+	if i.next == i.lastNode || (i.hi != nil && bytes.Compare(i.next.key, i.hi) == 1) {
 		i.next = nil
 	}
 
